@@ -367,11 +367,7 @@ canvas.motiv-chart{width:100%;display:block}
     </div>
   </div>
   <!-- Time -->
-  <div class="card"><div class="card-h"><span>&#9201;&#65039;</span> 時間の使い方</div><div class="sec-label">何に・どれくらい時間を使ったか</div>
-    <table class="time-table" id="time-table"><thead><tr><th>活動内容</th><th style="width:90px">時間(h)</th><th style="width:36px"></th></tr></thead><tbody id="time-tbody"></tbody></table>
-    <div class="time-total">合計: <span id="time-total">0.0</span> 時間</div>
-    <button class="btn btn-ghost btn-sm" onclick="addTimeRow()" style="margin-top:8px">＋ 活動を追加</button>
-  </div>
+  <div class="card"><div class="card-h"><span>&#10024;</span> 印象的だった出来事</div><div class="sec-label">今日の出来事・気になったことを記録しよう</div><div id="impression-list"></div><button class="btn btn-ghost btn-sm" onclick="addImpressionRow()" style="margin-top:8px">＋ 出来事を追加</button></div>
   <!-- Sleep & Health -->
   <div class="card"><div class="card-h"><span>&#128564;</span> 睡眠・体調</div>
     <div class="two-col"><div class="fg"><label>就寝時刻</label><input type="time" id="d-bedtime"></div><div class="fg"><label>起床時刻</label><input type="time" id="d-wakeup"></div></div>
@@ -388,10 +384,7 @@ canvas.motiv-chart{width:100%;display:block}
     <div class="fg"><label>モチベーションのメモ（任意）</label><input type="text" id="d-motiv-memo" placeholder="何がやる気に影響した？"></div>
   </div>
   <!-- Enjoy -->
-  <div class="card"><div class="card-h"><span>&#127775;</span> 楽しかったこと</div>
-    <div class="fg"><label>何が楽しかったか</label><input type="text" id="d-enjoy-what" placeholder="例：チームでランチした..."></div>
-    <div class="fg"><label>なぜ楽しかったか</label><textarea id="d-enjoy-why" rows="2" placeholder="その理由..."></textarea></div>
-  </div>
+  <div class="card"><div class="card-h"><span>&#127775;</span> 楽しかったこと</div><div class="sec-label">何が・なぜ楽しかったか記録しよう</div><div id="enjoy-list"></div><button class="btn btn-ghost btn-sm" onclick="addEnjoyRow()" style="margin-top:8px">＋ 追加</button></div>
   <!-- Bad -->
   <div class="card"><div class="card-h"><span>&#128542;</span> 不愉快だったこと</div>
     <div class="fg"><label>何が不愉快だったか</label><input type="text" id="d-bad-what" placeholder="例：コミュニケーションがうまくいかなかった..."></div>
@@ -499,10 +492,13 @@ async function loadCloud(){
     const r=await fetch(API_URL);
     if(!r.ok)throw new Error('fetch failed');
     const data=await r.json();
-    // マージ: クラウドのデータをベースに、ローカルの未同期データをマージ
+    // マージ: クラウドのデータをベースに、キーを正規化
     const merged=init();
     ['daily','weekly','monthly','weeklyGoals','monthlyGoals'].forEach(k=>{
-      merged[k]={...(data[k]||{})};
+      const src=data[k]||{};
+      const norm={};
+      Object.entries(src).forEach(([key,val])=>{norm[normalizeKey(key)]=val});
+      merged[k]=norm;
     });
     merged.memos=Array.isArray(data.memos)?data.memos:[];
     syncStatus='done';updateSyncBadge();
@@ -550,6 +546,21 @@ async function initialSync(){
 // DOMが準備できてから同期開始（initAppの後に呼ばれる）
 
 // ===== UTIL =====
+// 堅牢な日付パース: "2026-03-17", "2026/03/17", "Mon Mar 17 2026" 等に対応
+function parseDate(s){
+  if(!s)return null;
+  // YYYY-MM-DD or YYYY/MM/DD
+  const m1=String(s).match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if(m1)return new Date(+m1[1],+m1[2]-1,+m1[3]);
+  // fallback: Dateコンストラクタ
+  const d=new Date(s);
+  return isNaN(d.getTime())?null:d;
+}
+// 日付キーを正規化 (YYYY-MM-DD形式に統一)
+function normalizeKey(s){
+  const d=parseDate(s);
+  return d?toLD(d):String(s);
+}
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
 function toLD(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function today(){return toLD(new Date())}
@@ -577,7 +588,7 @@ function weekLabel(wk){const s=new Date(wk+'T00:00:00');const e=new Date(s);e.se
 let curWK='';
 
 // ===== DAILY =====
-let exVal=null,motivVal=null,timeRows=[],fbRows=[],failRows=[],weakRows=[],impRows=[];
+let exVal=null,motivVal=null,impressionRows=[],enjoyRows=[],fbRows=[],failRows=[],weakRows=[],impRows=[];
 
 function changeDay(n){const el=document.getElementById('daily-date');const d=new Date((el.value||today())+'T00:00:00');d.setDate(d.getDate()+n);el.value=toLD(d);loadDailyForm()}
 function goToday(){document.getElementById('daily-date').value=today();loadDailyForm()}
@@ -588,16 +599,20 @@ function loadDailyForm(){
   document.getElementById('d-bedtime').value=e.bedtime||'';
   document.getElementById('d-wakeup').value=e.wakeup||'';
   document.getElementById('d-health').value=e.health||'';
-  document.getElementById('d-enjoy-what').value=e.enjoyWhat||'';
-  document.getElementById('d-enjoy-why').value=e.enjoyWhy||'';
   document.getElementById('d-bad-what').value=e.badWhat||'';
   document.getElementById('d-bad-why').value=e.badWhy||'';
   document.getElementById('d-ex-memo').value=e.exMemo||'';
   document.getElementById('d-motiv-memo').value=e.motivMemo||'';
   exVal=e.exercise!==undefined?e.exercise:null;updEx();
   motivVal=e.motivation||null;updMotiv();
-  renderTime(e.timeEntries||[]);renderFb(e.feedbacks||[]);renderFail(e.failures||[]);
-  // Weakness & Improvement: support both old string format and new array format
+  // 印象的だった出来事（旧timeEntriesから移行）
+  const impArr=Array.isArray(e.impressions)?e.impressions:(e.timeEntries&&e.timeEntries.length?e.timeEntries.map(t=>({content:t.activity+(t.hours?' ('+t.hours+'h)':'')})):[]);
+  renderImpression(impArr);
+  // 楽しかったこと（旧enjoyWhat/Whyから移行）
+  const enjArr=Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat,why:e.enjoyWhy||''}]:[]);
+  renderEnjoy(enjArr);
+  renderFb(e.feedbacks||[]);renderFail(e.failures||[]);
+  // Weakness & Improvement
   const wkArr=Array.isArray(e.weaknesses)?e.weaknesses:(e.weakness?[{content:e.weakness}]:[]);
   const imArr=Array.isArray(e.improvements)?e.improvements:(e.improvement?[{content:e.improvement}]:[]);
   renderWeak(wkArr);renderImp(imArr);
@@ -609,12 +624,17 @@ function updEx(){document.getElementById('ex-yes').className='tg-btn'+(exVal===t
 function setMotiv(v){motivVal=v;updMotiv()}
 function updMotiv(){for(let i=1;i<=5;i++)document.getElementById('mb'+i).className='motiv-btn'+(motivVal===i?' m-sel-'+i:'');const n=document.getElementById('motiv-note');const msgs=['','つらい日もある。自分を責めないでね。','少し低め。何が原因かメモしておこう。','まずまず。安定してるね。','いい調子！','絶好調！何がやる気に繋がったか記録しよう'];n.textContent=motivVal?msgs[motivVal]:''}
 
-// Time
-function renderTime(rows){timeRows=rows.length?rows.map(r=>({...r})):[{activity:'',hours:''}];rebuildTime()}
-function addTimeRow(){timeRows.push({activity:'',hours:''});rebuildTime()}
-function delTimeRow(i){timeRows.splice(i,1);if(!timeRows.length)timeRows=[{activity:'',hours:''}];rebuildTime()}
-function rebuildTime(){const tb=document.getElementById('time-tbody');tb.innerHTML='';timeRows.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML='<td><input type="text" value="'+esc(r.activity)+'" oninput="timeRows['+i+'].activity=this.value" placeholder="例：仕事、読書..."></td><td><input type="number" class="inp-hr" value="'+(r.hours||'')+'" min="0" max="24" step="0.5" oninput="timeRows['+i+'].hours=parseFloat(this.value)||0;updTimeTotal()" placeholder="0"></td><td><button class="btn-del-row" onclick="delTimeRow('+i+')">&#10005;</button></td>';tb.appendChild(tr)});updTimeTotal()}
-function updTimeTotal(){document.getElementById('time-total').textContent=timeRows.reduce((s,r)=>s+(parseFloat(r.hours)||0),0).toFixed(1)}
+// Impression（印象的だった出来事）
+function renderImpression(rows){impressionRows=rows.length?rows.map(r=>({...r})):[{content:''}];rebuildImpression()}
+function addImpressionRow(){impressionRows.push({content:''});rebuildImpression()}
+function delImpressionRow(i){impressionRows.splice(i,1);if(!impressionRows.length)impressionRows=[{content:''}];rebuildImpression()}
+function rebuildImpression(){document.getElementById('impression-list').innerHTML=impressionRows.map((r,i)=>'<div class="dyn-item"><div class="dyn-num">'+(i+1)+'</div><div class="dyn-item-body"><textarea oninput="impressionRows['+i+'].content=this.value" placeholder="印象に残った出来事や気づき...">'+esc(r.content)+'</textarea></div><button class="btn-del-row" onclick="delImpressionRow('+i+')">&#10005;</button></div>').join('')}
+
+// Enjoy（楽しかったこと・複数）
+function renderEnjoy(rows){enjoyRows=rows.length?rows.map(r=>({...r})):[{what:'',why:''}];rebuildEnjoy()}
+function addEnjoyRow(){enjoyRows.push({what:'',why:''});rebuildEnjoy()}
+function delEnjoyRow(i){enjoyRows.splice(i,1);if(!enjoyRows.length)enjoyRows=[{what:'',why:''}];rebuildEnjoy()}
+function rebuildEnjoy(){document.getElementById('enjoy-list').innerHTML=enjoyRows.map((r,i)=>'<div class="dyn-item"><div class="dyn-num">'+(i+1)+'</div><div class="dyn-item-body"><input type="text" value="'+esc(r.what)+'" oninput="enjoyRows['+i+'].what=this.value" placeholder="何が楽しかった？"><textarea oninput="enjoyRows['+i+'].why=this.value" placeholder="なぜ楽しかった？（理由）">'+esc(r.why)+'</textarea></div><button class="btn-del-row" onclick="delEnjoyRow('+i+')">&#10005;</button></div>').join('')}
 
 // FB
 function renderFb(rows){fbRows=rows.length?rows.map(r=>({...r})):[{who:'',content:''}];rebuildFb()}
@@ -672,18 +692,18 @@ function saveGoal(type){
 
 function saveDaily(){
   const date=document.getElementById('daily-date').value||today();
-  D.daily[date]={timeEntries:timeRows.filter(r=>r.activity.trim()),bedtime:document.getElementById('d-bedtime').value,wakeup:document.getElementById('d-wakeup').value,health:document.getElementById('d-health').value,exercise:exVal,exMemo:document.getElementById('d-ex-memo').value,motivation:motivVal,motivMemo:document.getElementById('d-motiv-memo').value,enjoyWhat:document.getElementById('d-enjoy-what').value,enjoyWhy:document.getElementById('d-enjoy-why').value,badWhat:document.getElementById('d-bad-what').value,badWhy:document.getElementById('d-bad-why').value,failures:failRows.filter(r=>r.what.trim()||r.why.trim()),weaknesses:weakRows.filter(r=>r.content.trim()),improvements:impRows.filter(r=>r.content.trim()),feedbacks:fbRows.filter(r=>r.who.trim()||r.content.trim()),savedAt:new Date().toISOString()};
+  D.daily[date]={impressions:impressionRows.filter(r=>r.content.trim()),bedtime:document.getElementById('d-bedtime').value,wakeup:document.getElementById('d-wakeup').value,health:document.getElementById('d-health').value,exercise:exVal,exMemo:document.getElementById('d-ex-memo').value,motivation:motivVal,motivMemo:document.getElementById('d-motiv-memo').value,enjoyments:enjoyRows.filter(r=>r.what.trim()||r.why.trim()),badWhat:document.getElementById('d-bad-what').value,badWhy:document.getElementById('d-bad-why').value,failures:failRows.filter(r=>r.what.trim()||r.why.trim()),weaknesses:weakRows.filter(r=>r.content.trim()),improvements:impRows.filter(r=>r.content.trim()),feedbacks:fbRows.filter(r=>r.who.trim()||r.content.trim()),savedAt:new Date().toISOString()};
   save();renderDailyHist();showToast('日報を保存したよ！','lav');
 }
-function clearDaily(){if(!confirm('フォームをクリアしますか？'))return;['d-bedtime','d-wakeup','d-health','d-enjoy-what','d-enjoy-why','d-bad-what','d-bad-why','d-ex-memo','d-motiv-memo'].forEach(id=>document.getElementById(id).value='');exVal=null;updEx();motivVal=null;updMotiv();renderTime([]);renderFb([]);renderFail([]);renderWeak([]);renderImp([])}
+function clearDaily(){if(!confirm('フォームをクリアしますか？'))return;['d-bedtime','d-wakeup','d-health','d-bad-what','d-bad-why','d-ex-memo','d-motiv-memo'].forEach(id=>document.getElementById(id).value='');exVal=null;updEx();motivVal=null;updMotiv();renderImpression([]);renderEnjoy([]);renderFb([]);renderFail([]);renderWeak([]);renderImp([])}
 
 function renderDailyHist(){
   const el=document.getElementById('daily-hist');
   const dates=Object.keys(D.daily).sort().reverse();
   if(!dates.length){el.innerHTML='<div class="empty"><span class="empty-emoji">&#127793;</span>まだ記録がないよ</div>';return}
   el.innerHTML=dates.map(date=>{
-    const e=D.daily[date],dt=new Date(date+'T00:00:00');
-    const label=dt.getFullYear()+'年'+(dt.getMonth()+1)+'月'+dt.getDate()+'日（'+DAY_L[dt.getDay()]+'）';
+    const e=D.daily[date],dt=parseDate(date);
+    const label=dt?dt.getFullYear()+'年'+(dt.getMonth()+1)+'月'+dt.getDate()+'日（'+DAY_L[dt.getDay()]+'）':date;
     let tags='';
     if(e.exercise===true)tags+='<span class="hist-tag mint">&#10004;運動</span>';
     if(e.exercise===false)tags+='<span class="hist-tag pink">&#10060;運動なし</span>';
@@ -693,19 +713,22 @@ function renderDailyHist(){
     if(e.feedbacks&&e.feedbacks.filter(f=>f.content).length)tags+='<span class="hist-tag">FB'+e.feedbacks.filter(f=>f.content).length+'件</span>';
     return'<div class="hist-item" onclick="showDailyDetail(\''+date+'\')"><div class="hist-date">'+label+'</div><div class="hist-preview">'+(tags||'詳細を見る')+'</div></div>'}).join('')}
 
-function showDailyDetail(date){
-  const e=D.daily[date];if(!e)return;
-  const dt=new Date(date+'T00:00:00');
-  const label=dt.getFullYear()+'年'+(dt.getMonth()+1)+'月'+dt.getDate()+'日（'+DAY_L[dt.getDay()]+'）';
+function showDailyDetail(rawDate){
+  const date=normalizeKey(rawDate);
+  const e=D.daily[rawDate]||D.daily[date];if(!e)return;
+  const dt=parseDate(date);
+  const label=dt?dt.getFullYear()+'年'+(dt.getMonth()+1)+'月'+dt.getDate()+'日（'+DAY_L[dt.getDay()]+'）':date;
   let rows='';
   const wg=getWG(weekKey(date)),mg=getMG(date.slice(0,7));
   if(mg)rows+=dr('&#128197; 今月の目標',mg);if(wg)rows+=dr('&#128197; 今週の目標',wg);
-  if(e.timeEntries&&e.timeEntries.length)rows+=dr('時間の使い方',e.timeEntries.map(t=>t.activity+'：'+t.hours+'h').join('、'));
+  const impArr=Array.isArray(e.impressions)?e.impressions:(e.timeEntries&&e.timeEntries.length?e.timeEntries.map(t=>({content:t.activity+(t.hours?' ('+t.hours+'h)':'')})):[]);
+  if(impArr.length)rows+=dr('印象的だった出来事',impArr.map((r,i)=>(i+1)+'. '+r.content).join('\n'));
   if(e.bedtime||e.wakeup)rows+=dr('睡眠','就寝 '+(e.bedtime||'?')+' → 起床 '+(e.wakeup||'?'));
   if(e.health)rows+=dr('体調',e.health);
   if(e.exercise!==null&&e.exercise!==undefined)rows+=dr('運動',e.exercise?('できた'+(e.exMemo?' — '+e.exMemo:'')):'できなかった');
   if(e.motivation)rows+=dr('モチベーション',ME[e.motivation]+' '+ML[e.motivation]+(e.motivMemo?' — '+e.motivMemo:''));
-  if(e.enjoyWhat)rows+=dr('楽しかったこと',e.enjoyWhat+(e.enjoyWhy?'\n→ '+e.enjoyWhy:''));
+  const enjArr=Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat,why:e.enjoyWhy||''}]:[]);
+  if(enjArr.length)rows+=dr('楽しかったこと',enjArr.map((r,i)=>(i+1)+'. '+r.what+(r.why?'\n   → '+r.why:'')).join('\n'));
   if(e.badWhat)rows+=dr('不愉快だったこと',e.badWhat+(e.badWhy?'\n→ '+e.badWhy:''));
   if(e.failures&&e.failures.length)rows+=dr('失敗したこと',e.failures.map((f,i)=>(i+1)+'. '+f.what+(f.why?' → '+f.why:'')+(f.lesson?' → 学び: '+f.lesson:'')).join('\n'));
   const wArr=Array.isArray(e.weaknesses)?e.weaknesses:(e.weakness?[{content:e.weakness}]:[]);
@@ -713,11 +736,12 @@ function showDailyDetail(date){
   if(wArr.length)rows+=dr('苦手だとわかったこと',wArr.map((w,j)=>(j+1)+'. '+w.content).join('\n'));
   if(iArr.length)rows+=dr('改善したいこと',iArr.map((w,j)=>(j+1)+'. '+w.content).join('\n'));
   if(e.feedbacks&&e.feedbacks.length)rows+=dr('もらったFB',e.feedbacks.map((f,i)=>(i+1)+'. ['+f.who+'] '+f.content).join('\n'));
-  rows+='<div style="margin-top:16px;display:flex;gap:8px"><button class="btn btn-pink btn-sm" onclick="editDay(\''+date+'\')">&#9999;&#65039; 編集</button><button class="btn btn-ghost btn-sm" onclick="delDay(\''+date+'\')">&#128465;&#65039; 削除</button></div>';
+  const safeDate=date.replace(/'/g,'');
+  rows+='<div style="margin-top:16px;display:flex;gap:8px"><button class="btn btn-pink btn-sm" onclick="editDay(\''+safeDate+'\')">&#9999;&#65039; 編集</button><button class="btn btn-ghost btn-sm" onclick="delDay(\''+safeDate+'\')">&#128465;&#65039; 削除</button></div>';
   showModal('&#128211; '+label,rows);
 }
-function editDay(d){document.getElementById('daily-date').value=d;loadDailyForm();closeModal();switchTab('daily');window.scrollTo(0,0)}
-function delDay(d){if(!confirm('削除しますか？'))return;delete D.daily[d];save();renderDailyHist();closeModal();showToast('削除したよ','pink')}
+function editDay(d){const nd=normalizeKey(d);document.getElementById('daily-date').value=nd;loadDailyForm();closeModal();switchTab('daily');window.scrollTo(0,0)}
+function delDay(d){const nd=normalizeKey(d);if(!confirm('削除しますか？'))return;delete D.daily[nd];save();renderDailyHist();closeModal();showToast('削除したよ','pink')}
 
 // ===== WEEKLY =====
 function changeWeek(n){const d=new Date(curWK+'T00:00:00');d.setDate(d.getDate()+n*7);curWK=toLD(d);updWKLabel();loadWeekly()}
@@ -756,7 +780,8 @@ function renderWeeklyAgg(entries){
   const wg=getWG(curWK),mg=getMG(curWK.slice(0,7));
   const tm={};entries.forEach(e=>(e.timeEntries||[]).forEach(t=>{if(t.activity&&t.hours)tm[t.activity]=(tm[t.activity]||0)+(parseFloat(t.hours)||0)}));
   const ts=Object.entries(tm).sort((a,b)=>b[1]-a[1]);const th=ts.length?ts.map(([a,h])=>'<span class="hist-tag">'+esc(a)+': '+h.toFixed(1)+'h</span>').join(' '):'記録なし';
-  const enj=entries.filter(e=>e.enjoyWhat).map(e=>esc(e.enjoyWhat)),bad=entries.filter(e=>e.badWhat).map(e=>esc(e.badWhat));
+  const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>esc(e.badWhat));
+  entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(esc(r.what)))});
   const imp=[],weaks=[];
   entries.forEach(e=>{
     const wa=Array.isArray(e.weaknesses)?e.weaknesses:(e.weakness?[{content:e.weakness}]:[]);
@@ -766,7 +791,8 @@ function renderWeeklyAgg(entries){
   });
   const fbs=[],fails=[];
   entries.forEach(e=>{(e.feedbacks||[]).filter(f=>f.content).forEach(f=>fbs.push(esc('['+f.who+'] '+f.content)));(e.failures||[]).filter(f=>f.what).forEach(f=>fails.push(esc(f.what+(f.lesson?' → '+f.lesson:''))))});
-  el.innerHTML='<div class="summary-box">'+(mg?'<div class="summary-item"><strong>&#128197; 今月の目標</strong>'+esc(mg)+'</div>':'')+(wg?'<div class="summary-item"><strong>&#128197; 今週の目標</strong>'+esc(wg)+'</div>':'')+((mg||wg)?'<hr style="border:none;border-top:2px solid #f0eaf8;margin:10px 0">':'')+'<div class="summary-item"><strong>&#9201; 時間配分</strong><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">'+th+'</div></div>'+(enj.length?'<div class="summary-item" style="margin-top:10px"><strong class="mint">&#127775; 楽しかったこと</strong>'+enj.map(v=>'・'+v).join('<br>')+'</div>':'')+(bad.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128542; 不愉快だったこと</strong>'+bad.map(v=>'・'+v).join('<br>')+'</div>':'')+(fails.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128565; 失敗したこと</strong>'+fails.map(v=>'・'+v).join('<br>')+'</div>':'')+(weaks.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128269; 苦手だとわかったこと</strong>'+weaks.map(v=>'・'+v).join('<br>')+'</div>':'')+(imp.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128295; 改善メモ</strong>'+imp.map(v=>'・'+v).join('<br>')+'</div>':'')+(fbs.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128172; もらったFB</strong>'+fbs.map(v=>'・'+v).join('<br>')+'</div>':'')+'</div>'
+  const wkImprs=[];entries.forEach(e=>(Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>wkImprs.push(esc(r.content))));
+  el.innerHTML='<div class="summary-box">'+(mg?'<div class="summary-item"><strong>&#128197; 今月の目標</strong>'+esc(mg)+'</div>':'')+(wg?'<div class="summary-item"><strong>&#128197; 今週の目標</strong>'+esc(wg)+'</div>':'')+((mg||wg)?'<hr style="border:none;border-top:2px solid #f0eaf8;margin:10px 0">':'')+(wkImprs.length?'<div class="summary-item"><strong>&#10024; 印象的だった出来事</strong>'+wkImprs.map(v=>'・'+v).join('<br>')+'</div>':'')+(enj.length?'<div class="summary-item" style="margin-top:10px"><strong class="mint">&#127775; 楽しかったこと</strong>'+enj.map(v=>'・'+v).join('<br>')+'</div>':'')+(bad.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128542; 不愉快だったこと</strong>'+bad.map(v=>'・'+v).join('<br>')+'</div>':'')+(fails.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128565; 失敗したこと</strong>'+fails.map(v=>'・'+v).join('<br>')+'</div>':'')+(weaks.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128269; 苦手だとわかったこと</strong>'+weaks.map(v=>'・'+v).join('<br>')+'</div>':'')+(imp.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128295; 改善メモ</strong>'+imp.map(v=>'・'+v).join('<br>')+'</div>':'')+(fbs.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128172; もらったFB</strong>'+fbs.map(v=>'・'+v).join('<br>')+'</div>':'')+'</div>'
 }
 
 function saveWeekly(){D.weekly[curWK]={achievement:document.getElementById('w-ach').value,good:document.getElementById('w-good').value,improve:document.getElementById('w-imp').value,hard:document.getElementById('w-hard').value,nextGoals:document.getElementById('w-next').value,savedAt:new Date().toISOString()};save();renderWeeklyHist();showToast('週報を保存したよ！','lav')}
@@ -791,9 +817,9 @@ function loadMonthly(){
   // Agg
   const aggEl=document.getElementById('mon-agg');
   if(!entries.length){aggEl.innerHTML='<div class="empty"><span class="empty-emoji">&#128203;</span>この月の日報がないよ</div>'}else{
-    const tm={};entries.forEach(e=>(e.timeEntries||[]).forEach(t=>{if(t.activity&&t.hours)tm[t.activity]=(tm[t.activity]||0)+(parseFloat(t.hours)||0)}));
-    const ts=Object.entries(tm).sort((a,b)=>b[1]-a[1]).slice(0,6);const th=ts.length?ts.map(([a,h])=>'<span class="hist-tag">'+esc(a)+': '+h.toFixed(1)+'h</span>').join(' '):'記録なし';
-    const enj=entries.filter(e=>e.enjoyWhat).map(e=>esc(e.enjoyWhat)),bad=entries.filter(e=>e.badWhat).map(e=>esc(e.badWhat));
+    const imprs=[];entries.forEach(e=>(Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>imprs.push(esc(r.content))));
+    const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>esc(e.badWhat));
+    entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(esc(r.what)))});
     const wk=[],mImp=[];
     entries.forEach(e=>{
       const wa=Array.isArray(e.weaknesses)?e.weaknesses:(e.weakness?[{content:e.weakness}]:[]);
@@ -802,7 +828,7 @@ function loadMonthly(){
       ia.filter(w=>w.content).forEach(w=>mImp.push(esc(w.content)));
     });
     const fails=[],fbs=[];entries.forEach(e=>{(e.failures||[]).filter(f=>f.what).forEach(f=>fails.push(esc(f.what+(f.lesson?' → '+f.lesson:''))));(e.feedbacks||[]).filter(f=>f.content).forEach(f=>fbs.push(esc('['+f.who+'] '+f.content)))});
-    aggEl.innerHTML='<div class="summary-box"><div class="summary-item"><strong>&#9201; 時間配分（上位）</strong><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">'+th+'</div></div>'+(enj.length?'<div class="summary-item" style="margin-top:10px"><strong class="mint">&#127775; 楽しかったこと（'+enj.length+'件）</strong>'+enj.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(bad.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128542; 不愉快だったこと（'+bad.length+'件）</strong>'+bad.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(fails.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128565; 失敗（'+fails.length+'件）</strong>'+fails.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(wk.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128269; 苦手（'+wk.length+'件）</strong>'+wk.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(mImp.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128295; 改善メモ（'+mImp.length+'件）</strong>'+mImp.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(fbs.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128172; FB（'+fbs.length+'件）</strong>'+fbs.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+'</div>'}
+    aggEl.innerHTML='<div class="summary-box">'+(imprs.length?'<div class="summary-item"><strong>&#10024; 印象的だった出来事（'+imprs.length+'件）</strong>'+imprs.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(enj.length?'<div class="summary-item" style="margin-top:10px"><strong class="mint">&#127775; 楽しかったこと（'+enj.length+'件）</strong>'+enj.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(bad.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128542; 不愉快だったこと（'+bad.length+'件）</strong>'+bad.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(fails.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128565; 失敗（'+fails.length+'件）</strong>'+fails.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(wk.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128269; 苦手（'+wk.length+'件）</strong>'+wk.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(mImp.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128295; 改善メモ（'+mImp.length+'件）</strong>'+mImp.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(fbs.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128172; FB（'+fbs.length+'件）</strong>'+fbs.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+'</div>'}
   // Suggest
   renderSuggest(entries,'monthly',mon);
   // Saved
@@ -878,10 +904,10 @@ function drawMotivMonthly(mon,yr,mo,dim){
 function toggleMece(el){el.nextElementSibling.classList.toggle('hidden');el.querySelector('.mece-arrow').classList.toggle('open')}
 function groupSim(arr){if(!arr.length)return[];const g=[],u=new Set();for(let i=0;i<arr.length;i++){if(u.has(i))continue;const c=[arr[i]];u.add(i);for(let j=i+1;j<arr.length;j++){if(u.has(j))continue;if(arr[i].includes(arr[j])||arr[j].includes(arr[i])){c.push(arr[j]);u.add(j)}}g.push(c)}return g.sort((a,b)=>b.length-a.length)}
 function analyze(entries){
-  const p={n:entries.length,tm:{},totalH:0,enj:[],enjW:[],bad:[],badW:[],failW:[],failWhy:[],failL:[],weak:[],imp:[],fbs:[],exD:0,noExD:0,health:[],sleep:[],motiv:[],motivM:[],wGoals:[]};
+  const p={n:entries.length,tm:{},totalH:0,enj:[],enjW:[],impressions:[],bad:[],badW:[],failW:[],failWhy:[],failL:[],weak:[],imp:[],fbs:[],exD:0,noExD:0,health:[],sleep:[],motiv:[],motivM:[],wGoals:[]};
   entries.forEach(e=>{
-    (e.timeEntries||[]).forEach(t=>{if(t.activity&&t.hours){p.tm[t.activity.trim()]=(p.tm[t.activity.trim()]||0)+(parseFloat(t.hours)||0);p.totalH+=(parseFloat(t.hours)||0)}});
-    if(e.enjoyWhat)p.enj.push(e.enjoyWhat);if(e.enjoyWhy)p.enjW.push(e.enjoyWhy);
+    (Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>p.impressions.push(r.content));
+    (Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat,why:e.enjoyWhy||''}]:[])).filter(r=>r.what).forEach(r=>{p.enj.push(r.what);if(r.why)p.enjW.push(r.why)});
     if(e.badWhat)p.bad.push(e.badWhat);if(e.badWhy)p.badW.push(e.badWhy);
     (e.failures||[]).forEach(f=>{if(f.what)p.failW.push(f.what);if(f.why)p.failWhy.push(f.why);if(f.lesson)p.failL.push(f.lesson)});
     (e.feedbacks||[]).forEach(f=>{if(f.content)p.fbs.push(f)});
