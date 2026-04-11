@@ -313,6 +313,16 @@ canvas.motiv-chart{width:100%;display:block}
 .sg-action::before{content:'\\2705';flex-shrink:0;font-size:12px}
 .sg-insight{background:rgba(255,255,255,.6);border-radius:10px;padding:8px 12px;margin-top:6px;font-size:12px;color:var(--textl);line-height:1.6}
 .sg-insight strong{color:var(--text)}
+.sg-toggle{margin-top:6px}
+.sg-toggle summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--lav3);padding:4px 0;user-select:none;list-style:none;display:flex;align-items:center;gap:4px}
+.sg-toggle summary::-webkit-details-marker{display:none}
+.sg-toggle summary::before{content:'▶';font-size:9px;transition:transform .2s;display:inline-block}
+.sg-toggle[open] summary::before{transform:rotate(90deg)}
+.sg-toggle .sg-detail-list{padding:6px 0 2px 8px;font-size:12px;color:var(--text);line-height:1.8}
+.sg-toggle .sg-detail-list .sg-d-item{padding:2px 0;border-bottom:1px solid rgba(0,0,0,.04)}
+.sg-toggle .sg-detail-list .sg-d-item:last-child{border-bottom:none}
+.sg-common{background:rgba(255,255,255,.7);border-radius:10px;padding:8px 12px;margin-top:6px;font-size:12px;line-height:1.6}
+.sg-common strong{color:var(--text)}
 .sg-data{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.7);border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;color:#5a4a6a;margin:2px}
 .sg-empty{text-align:center;padding:20px;color:var(--textl);font-size:13px}
 .sg-goal-box{background:linear-gradient(135deg,#e8f5e9,#f0fff8);border-radius:14px;padding:16px;margin-top:12px;border:2px solid #c8e6c9}
@@ -428,6 +438,7 @@ canvas.motiv-chart{width:100%;display:block}
   <div class="tab-band tb-monthly"><div class="tab-band-inner"><h2>&#127769; 月報</h2><p>1ヶ月の集計と振り返り</p></div>
     <div class="date-nav" style="padding-bottom:20px"><button class="btn-icon bi-peach" onclick="changeMon(-1)">&larr;</button><input type="month" id="mon-input" onchange="loadMonthly()"><button class="btn-icon bi-peach" onclick="changeMon(1)">&rarr;</button><button class="btn btn-ghost btn-sm" onclick="goThisMon()">今月</button></div>
   </div>
+  <div id="mon-goal-area"></div>
   <div class="card"><div class="card-h"><span>&#128202;</span> 今月の記録状況</div><div class="stats-row" id="mon-stats"></div></div>
   <div class="card" id="mon-motiv-card" style="display:none"><div class="card-h"><span>&#128293;</span> モチベーショングラフ</div><div class="chart-wrap"><canvas id="mon-motiv-cv" class="motiv-chart" height="200"></canvas><div class="chart-legend"><span><span class="chart-legend-dot" style="background:#e91e63"></span>モチベ</span><span><span class="chart-legend-dot" style="background:#b39ddb"></span>平均</span><span><span class="chart-legend-dot" style="background:rgba(129,199,132,.3)"></span>運動日</span></div></div><div id="mon-motiv-ins"></div></div>
   <div class="card"><div class="card-h"><span>&#128270;</span> 日報から自動集計</div><div id="mon-agg"><div class="empty"><span class="empty-emoji">&#128203;</span>日報を記録すると自動集計されるよ！</div></div></div>
@@ -494,13 +505,26 @@ async function loadCloud(){
     const data=await r.json();
     // マージ: クラウドのデータをベースに、キーを正規化
     const merged=init();
-    ['daily','weekly','monthly','weeklyGoals','monthlyGoals'].forEach(k=>{
-      const src=data[k]||{};
-      const norm={};
+    // 月キー正規化: "2026-04-01"→"2026-04"（GASがDate化した場合の復元）
+    function normalizeMonthKey(k){const s=String(k);const m=s.match(/^(\d{4}-\d{1,2})-01$/);return m?m[1]:s}
+    ['daily','weekly'].forEach(k=>{
+      const src=data[k]||{};const norm={};
       Object.entries(src).forEach(([key,val])=>{norm[normalizeKey(key)]=val});
       merged[k]=norm;
     });
+    ['monthly','monthlyGoals'].forEach(k=>{
+      const src=data[k]||{};const norm={};
+      Object.entries(src).forEach(([key,val])=>{norm[normalizeMonthKey(normalizeKey(key))]=val});
+      merged[k]=norm;
+    });
+    merged.weeklyGoals={};
+    Object.entries(data.weeklyGoals||{}).forEach(([key,val])=>{merged.weeklyGoals[normalizeKey(key)]=val});
     merged.memos=Array.isArray(data.memos)?data.memos:[];
+    // 時刻データ修復: GASがDate型にした bedtime/wakeup を "HH:MM" に復元
+    Object.values(merged.daily).forEach(e=>{
+      if(e.bedtime)e.bedtime=fixTime(e.bedtime);
+      if(e.wakeup)e.wakeup=fixTime(e.wakeup);
+    });
     syncStatus='done';updateSyncBadge();
     return merged;
   }catch(e){
@@ -558,10 +582,23 @@ function parseDate(s){
 }
 // 日付キーを正規化 (YYYY-MM-DD形式に統一)
 function normalizeKey(s){
+  const str=String(s);
+  // 月キー "2026-04" やプレーン文字列はそのまま返す
+  if(/^\d{4}-\d{1,2}$/.test(str))return str;
   const d=parseDate(s);
-  return d?toLD(d):String(s);
+  return d?toLD(d):str;
 }
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
+// GASがDate型にした時刻を "HH:MM" に復元（"1899-12-30T14:00:00.000Z"等 → "23:00"）
+function fixTime(v){
+  if(!v)return'';
+  const s=String(v);
+  if(/^\d{1,2}:\d{2}$/.test(s))return s;
+  // ISO日付文字列 → Dateで解釈してローカル時刻に変換
+  const d=new Date(s);
+  if(!isNaN(d.getTime()))return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  return'';
+}
 function toLD(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function today(){return toLD(new Date())}
 function showToast(m,t){const e=document.createElement('div');e.className='toast '+t;e.textContent=m;document.body.appendChild(e);setTimeout(()=>{e.style.opacity='0';e.style.transition='opacity .4s';setTimeout(()=>e.remove(),400)},2000)}
@@ -596,8 +633,8 @@ function goToday(){document.getElementById('daily-date').value=today();loadDaily
 function loadDailyForm(){
   const date=document.getElementById('daily-date').value||today();
   const e=D.daily[date]||{};
-  document.getElementById('d-bedtime').value=e.bedtime||'';
-  document.getElementById('d-wakeup').value=e.wakeup||'';
+  document.getElementById('d-bedtime').value=fixTime(e.bedtime);
+  document.getElementById('d-wakeup').value=fixTime(e.wakeup);
   document.getElementById('d-health').value=e.health||'';
   document.getElementById('d-bad-what').value=e.badWhat||'';
   document.getElementById('d-bad-why').value=e.badWhy||'';
@@ -723,7 +760,7 @@ function showDailyDetail(rawDate){
   if(mg)rows+=dr('&#128197; 今月の目標',mg);if(wg)rows+=dr('&#128197; 今週の目標',wg);
   const impArr=Array.isArray(e.impressions)?e.impressions:(e.timeEntries&&e.timeEntries.length?e.timeEntries.map(t=>({content:t.activity+(t.hours?' ('+t.hours+'h)':'')})):[]);
   if(impArr.length)rows+=dr('印象的だった出来事',impArr.map((r,i)=>(i+1)+'. '+r.content).join('\n'));
-  if(e.bedtime||e.wakeup)rows+=dr('睡眠','就寝 '+(e.bedtime||'?')+' → 起床 '+(e.wakeup||'?'));
+  if(e.bedtime||e.wakeup)rows+=dr('睡眠','就寝 '+(fixTime(e.bedtime)||'?')+' → 起床 '+(fixTime(e.wakeup)||'?'));
   if(e.health)rows+=dr('体調',e.health);
   if(e.exercise!==null&&e.exercise!==undefined)rows+=dr('運動',e.exercise?('できた'+(e.exMemo?' — '+e.exMemo:'')):'できなかった');
   if(e.motivation)rows+=dr('モチベーション',ME[e.motivation]+' '+ML[e.motivation]+(e.motivMemo?' — '+e.motivMemo:''));
@@ -776,7 +813,7 @@ function loadWeekly(){
   renderWeeklyHist();
 }
 
-function calcSleepMinsArr(entries){return entries.filter(e=>e.wakeup&&e.bedtime).map(e=>{const[bh,bm]=e.bedtime.split(':').map(Number),[wh,wm]=e.wakeup.split(':').map(Number);if(isNaN(bh)||isNaN(wh))return null;let d=(wh*60+wm)-(bh*60+bm);if(d<0)d+=1440;return d}).filter(d=>d!==null&&d>60&&d<720)}
+function calcSleepMinsArr(entries){return entries.filter(e=>e.wakeup&&e.bedtime).map(e=>{const bt=fixTime(e.bedtime),wu=fixTime(e.wakeup);if(!bt||!wu)return null;const[bh,bm]=bt.split(':').map(Number),[wh,wm]=wu.split(':').map(Number);if(isNaN(bh)||isNaN(wh))return null;let d=(wh*60+wm)-(bh*60+bm);if(d<0)d+=1440;return d}).filter(d=>d!==null&&d>60&&d<720)}
 function calcAvgSleepMins(entries){const m=calcSleepMinsArr(entries);return m.length?m.reduce((a,b)=>a+b,0)/m.length:0}
 function sleepMinsToStr(m){return m?Math.floor(m/60)+'時間'+String(Math.round(m%60)).padStart(2,'0')+'分':'--'}
 function calcAvgSleep(entries){const m=calcAvgSleepMins(entries);return m?sleepMinsToStr(m):'--'}
@@ -785,19 +822,31 @@ function renderWeeklyAgg(entries){
   const el=document.getElementById('wk-agg');
   if(!entries.length){el.innerHTML='<div class="empty"><span class="empty-emoji">&#128203;</span>この週の日報がないよ</div>';return}
   const wg=getWG(curWK),mg=getMG(curWK.slice(0,7));
-  const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>esc(e.badWhat));
-  entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(esc(r.what)))});
+  const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>e.badWhat);
+  entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(r.what))});
   const imp=[],weaks=[];
   entries.forEach(e=>{
     const wa=Array.isArray(e.weaknesses)?e.weaknesses:(e.weakness?[{content:e.weakness}]:[]);
-    wa.filter(w=>w.content).forEach(w=>weaks.push(esc(w.content)));
+    wa.filter(w=>w.content).forEach(w=>weaks.push(w.content));
     const ia=Array.isArray(e.improvements)?e.improvements:(e.improvement?[{content:e.improvement}]:[]);
-    ia.filter(w=>w.content).forEach(w=>imp.push(esc(w.content)));
+    ia.filter(w=>w.content).forEach(w=>imp.push(w.content));
   });
   const fbs=[],fails=[];
-  entries.forEach(e=>{(e.feedbacks||[]).filter(f=>f.content).forEach(f=>fbs.push(esc('['+f.who+'] '+f.content)));(e.failures||[]).filter(f=>f.what).forEach(f=>fails.push(esc(f.what+(f.lesson?' → '+f.lesson:''))))});
-  const wkImprs=[];entries.forEach(e=>(Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>wkImprs.push(esc(r.content))));
-  el.innerHTML='<div class="summary-box">'+(mg?'<div class="summary-item"><strong>&#128197; 今月の目標</strong>'+esc(mg)+'</div>':'')+(wg?'<div class="summary-item"><strong>&#128197; 今週の目標</strong>'+esc(wg)+'</div>':'')+((mg||wg)?'<hr style="border:none;border-top:2px solid #f0eaf8;margin:10px 0">':'')+(wkImprs.length?'<div class="summary-item"><strong>&#10024; 印象的だった出来事</strong>'+wkImprs.map(v=>'・'+v).join('<br>')+'</div>':'')+(enj.length?'<div class="summary-item" style="margin-top:10px"><strong class="mint">&#127775; 楽しかったこと</strong>'+enj.map(v=>'・'+v).join('<br>')+'</div>':'')+(bad.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128542; 不愉快だったこと</strong>'+bad.map(v=>'・'+v).join('<br>')+'</div>':'')+(fails.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128565; 失敗したこと</strong>'+fails.map(v=>'・'+v).join('<br>')+'</div>':'')+(weaks.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128269; 苦手だとわかったこと</strong>'+weaks.map(v=>'・'+v).join('<br>')+'</div>':'')+(imp.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128295; 改善メモ</strong>'+imp.map(v=>'・'+v).join('<br>')+'</div>':'')+(fbs.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128172; もらったFB</strong>'+fbs.map(v=>'・'+v).join('<br>')+'</div>':'')+'</div>'
+  entries.forEach(e=>{(e.feedbacks||[]).filter(f=>f.content).forEach(f=>fbs.push('['+f.who+'] '+f.content));(e.failures||[]).filter(f=>f.what).forEach(f=>fails.push(f.what+(f.lesson?' → '+f.lesson:'')))});
+  const wkImprs=[];entries.forEach(e=>(Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>wkImprs.push(r.content)));
+  let h='<div class="summary-box">';
+  if(mg)h+='<div class="summary-item"><strong>📅 今月の目標</strong>'+esc(mg)+'</div>';
+  if(wg)h+='<div class="summary-item"><strong>📅 今週の目標</strong>'+esc(wg)+'</div>';
+  if(mg||wg)h+='<hr style="border:none;border-top:2px solid #f0eaf8;margin:10px 0">';
+  const addSec=(emoji,label,cls,arr)=>{if(!arr.length)return;const fq=freqMap(arr);h+='<div class="summary-item" style="margin-top:10px"><strong'+(cls?' class="'+cls+'"':'')+'>'+emoji+' '+label+'（'+arr.length+'件）</strong>';if(fq.length&&fq[0][1]>=2)h+='<div class="sg-common" style="margin:4px 0">共通: '+fq.filter(([,n])=>n>=2).map(([k,n])=>'「'+esc(k)+'」('+n+'回)').join('、')+'</div>';h+=mkToggle('すべて表示',arr,15)+'</div>'};
+  addSec('✨','印象的だった出来事','',wkImprs);
+  addSec('🌟','楽しかったこと','mint',enj);
+  addSec('😞','不愉快だったこと','pink',bad);
+  addSec('🤯','失敗したこと','pink',fails);
+  addSec('🔍','苦手だとわかったこと','',weaks);
+  addSec('🔧','改善メモ','',imp);
+  addSec('💬','もらったFB','',fbs);
+  h+='</div>';el.innerHTML=h
 }
 
 function saveWeekly(){D.weekly[curWK]={achievement:document.getElementById('w-ach').value,good:document.getElementById('w-good').value,improve:document.getElementById('w-imp').value,hard:document.getElementById('w-hard').value,nextGoals:document.getElementById('w-next').value,savedAt:new Date().toISOString()};save();renderWeeklyHist();showToast('週報を保存したよ！','lav')}
@@ -815,24 +864,42 @@ function loadMonthly(){
   const rec=entries.length,exD=entries.filter(e=>e.exercise===true).length;
   const avgSl=calcAvgSleep(entries);const dim=new Date(yr,mo,0).getDate();
   const motivE=entries.filter(e=>e.motivation);const mAvg=motivE.length?motivE.reduce((s,e)=>s+e.motivation,0)/motivE.length:0;
+  // 今月の目標を表示
+  const monGoal=getMG(mon);
+  const prevMon=(()=>{const d=new Date(yr,mo-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')})();
+  const prevMonGoal=((D.monthly[prevMon]||{}).nextGoals||'');
+  const showGoal=monGoal||prevMonGoal;
+  const goalArea=document.getElementById('mon-goal-area');
+  if(showGoal){
+    goalArea.innerHTML='<div class="card" style="border-left:4px solid var(--peach3)"><div class="card-h"><span>🎯</span> '+(monGoal?'今月の目標':'先月から引き継いだ目標')+'</div><div style="padding:0 16px 12px;font-size:14px;color:var(--text);line-height:1.7">'+esc(showGoal).replace(/\n/g,'<br>')+'</div></div>';
+  }else{goalArea.innerHTML=''}
   document.getElementById('mon-stats').innerHTML='<div class="stat-box mint"><div class="stat-val">'+rec+'<span class="stat-unit">/'+dim+'</span></div><div class="stat-label">記録日数</div></div><div class="stat-box lav"><div class="stat-val">'+exD+'</div><div class="stat-label">運動日</div></div><div class="stat-box sky"><div class="stat-val">'+avgSl+'</div><div class="stat-label">平均睡眠</div></div><div class="stat-box peach"><div class="stat-val">'+Math.round(exD/Math.max(rec,1)*100)+'<span class="stat-unit">%</span></div><div class="stat-label">運動率</div></div>'+(mAvg?'<div class="stat-box sky"><div class="stat-val">'+ME[Math.round(mAvg)]+'<span class="stat-unit">'+mAvg.toFixed(1)+'</span></div><div class="stat-label">平均やる気</div></div>':'');
   // Motiv chart
   drawMotivMonthly(mon,yr,mo,dim);
   // Agg
   const aggEl=document.getElementById('mon-agg');
   if(!entries.length){aggEl.innerHTML='<div class="empty"><span class="empty-emoji">&#128203;</span>この月の日報がないよ</div>'}else{
-    const imprs=[];entries.forEach(e=>(Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>imprs.push(esc(r.content))));
-    const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>esc(e.badWhat));
-    entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(esc(r.what)))});
+    const imprs=[];entries.forEach(e=>(Array.isArray(e.impressions)?e.impressions:[]).filter(r=>r.content).forEach(r=>imprs.push(r.content)));
+    const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>e.badWhat);
+    entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(r.what))});
     const wk=[],mImp=[];
     entries.forEach(e=>{
       const wa=Array.isArray(e.weaknesses)?e.weaknesses:(e.weakness?[{content:e.weakness}]:[]);
-      wa.filter(w=>w.content).forEach(w=>wk.push(esc(w.content)));
+      wa.filter(w=>w.content).forEach(w=>wk.push(w.content));
       const ia=Array.isArray(e.improvements)?e.improvements:(e.improvement?[{content:e.improvement}]:[]);
-      ia.filter(w=>w.content).forEach(w=>mImp.push(esc(w.content)));
+      ia.filter(w=>w.content).forEach(w=>mImp.push(w.content));
     });
-    const fails=[],fbs=[];entries.forEach(e=>{(e.failures||[]).filter(f=>f.what).forEach(f=>fails.push(esc(f.what+(f.lesson?' → '+f.lesson:''))));(e.feedbacks||[]).filter(f=>f.content).forEach(f=>fbs.push(esc('['+f.who+'] '+f.content)))});
-    aggEl.innerHTML='<div class="summary-box">'+(imprs.length?'<div class="summary-item"><strong>&#10024; 印象的だった出来事（'+imprs.length+'件）</strong>'+imprs.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(enj.length?'<div class="summary-item" style="margin-top:10px"><strong class="mint">&#127775; 楽しかったこと（'+enj.length+'件）</strong>'+enj.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(bad.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128542; 不愉快だったこと（'+bad.length+'件）</strong>'+bad.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(fails.length?'<div class="summary-item" style="margin-top:10px"><strong class="pink">&#128565; 失敗（'+fails.length+'件）</strong>'+fails.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(wk.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128269; 苦手（'+wk.length+'件）</strong>'+wk.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(mImp.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128295; 改善メモ（'+mImp.length+'件）</strong>'+mImp.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+(fbs.length?'<div class="summary-item" style="margin-top:10px"><strong>&#128172; FB（'+fbs.length+'件）</strong>'+fbs.slice(0,5).map(v=>'・'+v).join('<br>')+'</div>':'')+'</div>'}
+    const fails=[],fbs=[];entries.forEach(e=>{(e.failures||[]).filter(f=>f.what).forEach(f=>fails.push(f.what+(f.lesson?' → '+f.lesson:'')));(e.feedbacks||[]).filter(f=>f.content).forEach(f=>fbs.push('['+f.who+'] '+f.content))});
+    let mh='<div class="summary-box">';
+    const addAggSec=(emoji,label,cls,arr)=>{if(!arr.length)return;const fq=freqMap(arr);mh+='<div class="summary-item" style="margin-top:10px"><strong'+(cls?' class="'+cls+'"':'')+'>'+emoji+' '+label+'（'+arr.length+'件）</strong>';if(fq.length&&fq[0][1]>=2)mh+='<div class="sg-common" style="margin:4px 0">共通: '+fq.filter(([,n])=>n>=2).map(([k,n])=>'「'+esc(k)+'」('+n+'回)').join('、')+'</div>';mh+=mkToggle('すべて表示',arr,20)+'</div>'};
+    addAggSec('✨','印象的だった出来事','',imprs);
+    addAggSec('🌟','楽しかったこと','mint',enj);
+    addAggSec('😞','不愉快だったこと','pink',bad);
+    addAggSec('🤯','失敗','pink',fails);
+    addAggSec('🔍','苦手','',wk);
+    addAggSec('🔧','改善メモ','',mImp);
+    addAggSec('💬','FB','',fbs);
+    mh+='</div>';aggEl.innerHTML=mh}
   // Suggest
   renderSuggest(entries,'monthly',mon);
   // Saved
@@ -915,6 +982,19 @@ function drawMotivMonthly(mon,yr,mo,dim){
 // ===== MECE SUGGEST =====
 function toggleMece(el){el.nextElementSibling.classList.toggle('hidden');el.querySelector('.mece-arrow').classList.toggle('open')}
 function groupSim(arr){if(!arr.length)return[];const g=[],u=new Set();for(let i=0;i<arr.length;i++){if(u.has(i))continue;const c=[arr[i]];u.add(i);for(let j=i+1;j<arr.length;j++){if(u.has(j))continue;if(arr[i].includes(arr[j])||arr[j].includes(arr[i])){c.push(arr[j]);u.add(j)}}g.push(c)}return g.sort((a,b)=>b.length-a.length)}
+function mkToggle(label,items,limit){
+  if(!items.length)return'';
+  const show=items.slice(0,limit||20);
+  return'<details class="sg-toggle"><summary>'+esc(label)+'（'+items.length+'件）</summary><div class="sg-detail-list">'+show.map(v=>'<div class="sg-d-item">・'+esc(v)+'</div>').join('')+(items.length>show.length?'<div class="sg-d-item" style="color:var(--textl)">…他 '+(items.length-show.length)+'件</div>':'')+'</div></details>';
+}
+function freqMap(arr){const f={};arr.forEach(s=>{if(s){const k=s.trim();if(k)f[k]=(f[k]||0)+1}});return Object.entries(f).sort((a,b)=>b[1]-a[1])}
+function mkCommon(label,freqs,icon){
+  if(!freqs.length)return'';
+  const top=freqs.filter(([,n])=>n>=2);
+  if(!top.length&&freqs.length<=2)return'<div class="sg-common">'+icon+' '+label+'：'+freqs.map(([k])=>'「'+esc(k)+'」').join('、')+'</div>';
+  if(!top.length)return'';
+  return'<div class="sg-common">'+icon+' <strong>'+label+'の共通パターン：</strong>'+top.map(([k,n])=>'「'+esc(k)+'」('+n+'回)').join('、')+(freqs.length>top.length?' ／ その他 '+(freqs.length-top.length)+'種類':'')+'</div>';
+}
 function analyze(entries){
   const p={n:entries.length,enj:[],enjW:[],impressions:[],bad:[],badW:[],failW:[],failWhy:[],failL:[],weak:[],imp:[],fbs:[],exD:0,noExD:0,health:[],sleep:[],motiv:[],motivM:[],wGoals:[],
     exMotivs:[],noExMotivs:[],sleepLongMotivs:[],sleepShortMotivs:[],badFreq:{},failFreq:{},weakFreq:{},
@@ -936,7 +1016,7 @@ function analyze(entries){
     if(e.health)p.health.push(e.health);
     // 睡眠時間（分）
     let slMins=0;
-    if(e.bedtime&&e.wakeup){const[bh,bm]=e.bedtime.split(':').map(Number),[wh,wm]=e.wakeup.split(':').map(Number);if(!isNaN(bh)&&!isNaN(wh)){let d=(wh*60+wm)-(bh*60+bm);if(d<0)d+=1440;if(d>60&&d<720){slMins=d;p.sleep.push(d/60)}}}
+    if(e.bedtime&&e.wakeup){const bt=fixTime(e.bedtime),wu=fixTime(e.wakeup);if(bt&&wu){const[bh,bm]=bt.split(':').map(Number),[wh,wm]=wu.split(':').map(Number);if(!isNaN(bh)&&!isNaN(wh)){let d=(wh*60+wm)-(bh*60+bm);if(d<0)d+=1440;if(d>60&&d<720){slMins=d;p.sleep.push(d/60)}}}}
     if(e.motivation){
       p.motiv.push(e.motivation);if(e.motivMemo)p.motivM.push(e.motivMemo);
       if(e.exercise===true)p.exMotivs.push(e.motivation);else if(e.exercise===false)p.noExMotivs.push(e.motivation);
@@ -983,7 +1063,9 @@ function renderSuggest(entries,period,key){
   if(entries.length<2){card.style.display='none';return}card.style.display='';
   const p=analyze(entries);
   const prevKey=period==='weekly'?(()=>{const d=new Date(key+'T00:00:00');d.setDate(d.getDate()-7);return toLD(d)})():(()=>{const[y,m]=key.split('-').map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')})();
-  const prevGoals=period==='weekly'?((D.weekly[prevKey]||{}).nextGoals||''):((D.monthly[prevKey]||{}).nextGoals||'');
+  const curGoal=period==='weekly'?getWG(key):getMG(key);
+  const prevNextGoals=period==='weekly'?((D.weekly[prevKey]||{}).nextGoals||''):((D.monthly[prevKey]||{}).nextGoals||'');
+  const prevGoals=curGoal||prevNextGoals;
   const unit=period==='weekly'?'週':'月';let html='';
 
   // 1. 楽しいこと・得意の傾向（頻度分析）
@@ -991,28 +1073,49 @@ function renderSuggest(entries,period,key){
   if(p.enj.length){
     const g=groupSim(p.enj);
     const topG=g[0];const freq=topG?topG.length:1;
-    s1+='<div class="sg-abstract">📌 '+p.n+'日間で楽しかったことを'+p.enj.length+'件記録。'+(freq>=2?'「'+esc(topG[0])+'」系が'+freq+'回と最多。':'記録を続けてパターンを見つけよう。')+'</div><div class="sg-concrete">';
-    if(topG&&topG.length>=2){s1+='<div class="sg-action">→ <strong>「'+esc(topG[0])+'」系</strong>が繰り返し登場（'+freq+'回）。これがあなたの強み候補。意識的に時間を確保しよう。</div>'}
-    if(p.enjW.length){const reasons=p.enjW.slice(-3);s1+='<div class="sg-insight">💡 <strong>楽しさの理由パターン：</strong>'+reasons.map(v=>esc(v)).join(' ／ ')+'</div><div class="sg-insight">→ この理由が満たされる活動をもっと増やすと充実度が上がりやすい。</div>'}
-    if(p.impressions.length){s1+='<div class="sg-insight">✨ 印象的な出来事（'+p.impressions.length+'件）：「'+esc(p.impressions[p.impressions.length-1])+'」等</div>'}
-    s1+='</div>';
+    const enjFreqs=freqMap(p.enj);
+    s1+='<div class="sg-abstract">📌 '+p.n+'日間で楽しかったことを'+p.enj.length+'件記録。'+(freq>=2?'「'+esc(topG[0])+'」系が'+freq+'回と最多。':'記録を続けてパターンを見つけよう。')+'</div>';
+    // 抽象: 共通パターン
+    s1+=mkCommon('楽しいこと',enjFreqs,'🌟');
+    if(p.enjW.length){
+      const whyFreqs=freqMap(p.enjW);
+      s1+=mkCommon('楽しさの理由',whyFreqs,'💡');
+    }
+    if(topG&&topG.length>=2){s1+='<div class="sg-insight">→ <strong>「'+esc(topG[0])+'」系</strong>が繰り返し登場（'+freq+'回）。これがあなたの強み候補。意識的に時間を確保しよう。</div>'}
+    // 具体: トグル
+    s1+=mkToggle('楽しかったこと一覧',p.enj,15);
+    if(p.enjW.length)s1+=mkToggle('楽しさの理由一覧',p.enjW,15);
+    if(p.impressions.length){
+      s1+=mkCommon('印象的な出来事',freqMap(p.impressions),'✨');
+      s1+=mkToggle('印象的な出来事一覧',p.impressions,15);
+    }
   }else{s1='<div class="sg-insight">「楽しかったこと」がまだ記録されていないよ。毎日1つ意識して書いてみよう。</div>'}
   html+=mSec('mece-s1','🌟','得意・楽しいことの傾向',s1);
 
   // 2. 失敗・苦手の繰り返しパターン
   let s2='';
-  const allIssues=[...p.topFails,...p.topWeaks];
   if(p.failW.length||p.weak.length){
-    s2+='<div class="sg-abstract">📌 失敗 <strong>'+p.failW.length+'件</strong>・苦手 <strong>'+p.weak.length+'件</strong>を記録。';
     const repeats=[...p.topFails.filter(([,n])=>n>=2),...p.topWeaks.filter(([,n])=>n>=2)];
-    s2+=(repeats.length?repeats.length+'種類が複数回登場。根本原因へのアプローチが必要。':'単発の記録。継続して観察しよう。')+'</div><div class="sg-concrete">';
-    if(p.topFails.length&&p.topFails[0][1]>=2){s2+='<div class="sg-action">⚠️ 繰り返し失敗：<strong>「'+esc(p.topFails[0][0])+'」</strong>（'+p.topFails[0][1]+'回）→ 仕組みで防ぐことを検討</div>'}
-    else if(p.failW.length){s2+='<div class="sg-action">失敗：「'+esc(p.failW[p.failW.length-1])+'」</div>'}
-    if(p.topWeaks.length&&p.topWeaks[0][1]>=2){s2+='<div class="sg-action">🔁 繰り返す苦手：<strong>「'+esc(p.topWeaks[0][0])+'」</strong>（'+p.topWeaks[0][1]+'回）→ 回避ではなく克服の戦略を</div>'}
-    else if(p.weak.length){s2+='<div class="sg-action">苦手：「'+esc(p.weak[p.weak.length-1])+'」</div>'}
-    if(p.failWhy.length){s2+='<div class="sg-insight">💡 <strong>失敗の原因：</strong>'+p.failWhy.slice(-2).map(v=>esc(v)).join(' ／ ')+'</div>'}
-    if(p.failL.length){s2+='<div class="sg-insight">📖 <strong>自分の学び：</strong>「'+esc(p.failL[p.failL.length-1])+'」→ 次の目標に落とし込もう。</div>'}
-    s2+='</div>';
+    s2+='<div class="sg-abstract">📌 失敗 <strong>'+p.failW.length+'件</strong>・苦手 <strong>'+p.weak.length+'件</strong>を記録。'+(repeats.length?repeats.length+'種類が複数回登場。根本原因へのアプローチが必要。':'単発の記録。継続して観察しよう。')+'</div>';
+    // 抽象: 共通パターン
+    if(p.topFails.length)s2+=mkCommon('失敗',p.topFails.map(([k,n])=>[k,n]),'⚠️');
+    if(p.topWeaks.length)s2+=mkCommon('苦手',p.topWeaks.map(([k,n])=>[k,n]),'🔁');
+    if(p.failWhy.length){
+      const whyFreqs=freqMap(p.failWhy);
+      s2+=mkCommon('失敗の原因',whyFreqs,'💡');
+    }
+    if(p.failL.length){
+      const learnFreqs=freqMap(p.failL);
+      s2+=mkCommon('学び',learnFreqs,'📖');
+    }
+    // 解釈
+    if(p.topFails.length&&p.topFails[0][1]>=2){s2+='<div class="sg-insight">→ <strong>「'+esc(p.topFails[0][0])+'」</strong>が'+p.topFails[0][1]+'回繰り返し。対処療法ではなく仕組みで防ぐことを検討。</div>'}
+    if(p.topWeaks.length&&p.topWeaks[0][1]>=2){s2+='<div class="sg-insight">→ <strong>「'+esc(p.topWeaks[0][0])+'」</strong>が'+p.topWeaks[0][1]+'回。回避ではなく克服の戦略を考えよう。</div>'}
+    // 具体: トグル
+    s2+=mkToggle('失敗の記録一覧',p.failW,15);
+    if(p.failWhy.length)s2+=mkToggle('失敗の原因一覧',p.failWhy,15);
+    if(p.failL.length)s2+=mkToggle('得られた学び一覧',p.failL,15);
+    s2+=mkToggle('苦手の記録一覧',p.weak,15);
   }else{s2='<div class="sg-insight">失敗・苦手の記録がまだないよ。気づきを記録すると改善が加速する。</div>'}
   html+=mSec('mece-s2','🔧','失敗・苦手の繰り返しパターン',s2);
 
@@ -1042,50 +1145,43 @@ function renderSuggest(entries,period,key){
     s4+='<div class="sg-action">運動率: <strong>'+Math.round(exRate*100)+'%</strong>'+(exRate<0.43?' → 目標: 週3日以上':exRate>=0.71?' → 素晴らしい習慣！':' → 維持しよう')+'</div>'
   }
   // 不調パターン
-  if(p.topBads.length&&p.topBads[0][1]>=2){s4+='<div class="sg-insight">😓 <strong>繰り返す不愉快：</strong>「'+esc(p.topBads[0][0])+'」（'+p.topBads[0][1]+'回）→ 環境・関係性の見直しが必要かも。</div>'}
+  if(p.bad.length){
+    s4+=mkCommon('不愉快なこと',freqMap(p.bad),'😓');
+    if(p.topBads.length&&p.topBads[0][1]>=2){s4+='<div class="sg-insight">→ 「'+esc(p.topBads[0][0])+'」が'+p.topBads[0][1]+'回繰り返し。環境・関係性の見直しが必要かも。</div>'}
+    s4+=mkToggle('不愉快だったこと一覧',p.bad,15);
+  }
   s4+='</div>';
   html+=mSec('mece-s4','💪','生活基盤データ（睡眠・運動の相関）',s4);
 
   // 4. モチベーション分析（高い日vs低い日の条件比較）
   if(p.motiv.length>=2){
-    let sm='<div class="sg-abstract">📌 '+p.motiv.length+'日分のモチベを記録。平均 <strong>'+p.motivAvg.toFixed(1)+'/5.0</strong>（高い日: '+p.motivHi+'日 ／ 低い日: '+p.motivLo+'日）。'+(p.motivAvg>=3.5?'全体的に良好。':'ムラがある。高い日と低い日の条件を比較しよう。')+'</div><div class="sg-concrete">';
+    let sm='<div class="sg-abstract">📌 '+p.motiv.length+'日分のモチベを記録。平均 <strong>'+p.motivAvg.toFixed(1)+'/5.0</strong>（高い日: '+p.motivHi+'日 ／ 低い日: '+p.motivLo+'日）。'+(p.motivAvg>=3.5?'全体的に良好。':'ムラがある。高い日と低い日の条件を比較しよう。')+'</div>';
     if(p.highMotivDays.length>0&&p.lowMotivDays.length>0){
-      // 高い日の特徴
-      sm+='<div style="background:#f0fff4;border-left:3px solid #4caf50;padding:8px 10px;border-radius:0 8px 8px 0;margin-bottom:8px">';
-      sm+='<strong>🔼 モチベ高い日（'+p.motivHi+'日）の特徴：</strong><br>';
-      if(p.hiSlAvg)sm+='・睡眠: <strong>'+sleepMinsToStr(p.hiSlAvg)+'</strong><br>';
-      sm+='・運動: <strong>'+Math.round(p.hiExRate*100)+'%</strong>（'+p.highMotivDays.filter(d=>d.exercise===true).length+'/'+p.highMotivDays.length+'日）<br>';
-      if(p.hiTopEnj.length)sm+='・楽しかったこと: 「'+p.hiTopEnj.map(v=>esc(v)).join('」「')+'」<br>';
-      if(p.hiTopImprs.length)sm+='・印象的な出来事: 「'+p.hiTopImprs.map(v=>esc(v)).join('」「')+'」<br>';
-      if(p.hiMotivMemos.length)sm+='・メモ: '+p.hiMotivMemos.map(v=>esc(v)).join(' ／ ');
-      sm+='</div>';
-      // 低い日の特徴
-      sm+='<div style="background:#fff5f5;border-left:3px solid #f44336;padding:8px 10px;border-radius:0 8px 8px 0;margin-bottom:8px">';
-      sm+='<strong>🔽 モチベ低い日（'+p.motivLo+'日）の特徴：</strong><br>';
-      if(p.loSlAvg)sm+='・睡眠: <strong>'+sleepMinsToStr(p.loSlAvg)+'</strong><br>';
-      sm+='・運動: <strong>'+Math.round(p.loExRate*100)+'%</strong>（'+p.lowMotivDays.filter(d=>d.exercise===true).length+'/'+p.lowMotivDays.length+'日）<br>';
-      if(p.loTopBad.length)sm+='・不愉快: 「'+p.loTopBad.map(v=>esc(v)).join('」「')+'」<br>';
-      if(p.loTopFail.length)sm+='・失敗: 「'+p.loTopFail.map(v=>esc(v)).join('」「')+'」<br>';
-      if(p.loMotivMemos.length)sm+='・メモ: '+p.loMotivMemos.map(v=>esc(v)).join(' ／ ');
-      sm+='</div>';
-      // 差分サマリー
-      sm+='<div class="sg-insight"><strong>📊 差分まとめ：</strong>';
+      // 抽象: 差分サマリーを先に
+      sm+='<div class="sg-common"><strong>📊 高い日 vs 低い日の差分：</strong><br>';
       const insights=[];
-      if(p.hiSlAvg&&p.loSlAvg){const diff=p.hiSlAvg-p.loSlAvg;if(Math.abs(diff)>20)insights.push('睡眠が高い日の方が<strong>'+sleepMinsToStr(Math.abs(diff))+'長い</strong>'+(diff>0?'（十分な睡眠がカギかも）':'（睡眠量以外が影響か）'))}
-      if(p.highMotivDays.length>0&&p.lowMotivDays.length>0){const hiEx=p.hiExRate,loEx=p.loExRate;if(Math.abs(hiEx-loEx)>0.2)insights.push('運動率が高い日は<strong>'+Math.round(hiEx*100)+'%</strong> vs 低い日は<strong>'+Math.round(loEx*100)+'%</strong>'+(hiEx>loEx?'（運動が効いている可能性）':''))}
-      if(insights.length)sm+=insights.join('・');else sm+='もう少しデータが溜まると見えてくるよ';
-      sm+='</div>';
+      if(p.hiSlAvg&&p.loSlAvg){const diff=p.hiSlAvg-p.loSlAvg;if(Math.abs(diff)>20)insights.push('睡眠: 高い日 <strong>'+sleepMinsToStr(p.hiSlAvg)+'</strong> vs 低い日 <strong>'+sleepMinsToStr(p.loSlAvg)+'</strong>'+(diff>0?' → 十分な睡眠がカギ':' → 睡眠以外の要因が大きい'))}
+      if(p.highMotivDays.length>0&&p.lowMotivDays.length>0){const hiEx=p.hiExRate,loEx=p.loExRate;if(Math.abs(hiEx-loEx)>0.2)insights.push('運動率: 高い日 <strong>'+Math.round(hiEx*100)+'%</strong> vs 低い日 <strong>'+Math.round(loEx*100)+'%</strong>'+(hiEx>loEx?' → 運動が効いている':''))}
+      if(p.hiTopEnj.length){const enjCommon=p.hiTopEnj.filter(e=>!p.loTopBad||!p.loTopBad.includes(e));if(enjCommon.length)insights.push('高い日に多い活動: 「'+enjCommon.map(v=>esc(v)).join('」「')+'」')}
+      if(p.loTopBad.length)insights.push('低い日に多い不愉快: 「'+p.loTopBad.map(v=>esc(v)).join('」「')+'」');
+      sm+=(insights.length?insights.join('<br>'):'もう少しデータが溜まると見えてくるよ')+'</div>';
+      // 具体: 高い日の詳細（トグル）
+      const hiDetails=p.highMotivDays.map(d=>{const parts=[];if(d.slMins)parts.push('睡眠'+sleepMinsToStr(d.slMins));parts.push(d.exercise?'運動○':'運動×');if(d.enj.length)parts.push('楽しい:'+d.enj.join(','));if(d.impressions.length)parts.push('印象:'+d.impressions.join(','));if(d.motivMemo)parts.push('メモ:'+d.motivMemo);return parts.join(' ／ ')});
+      sm+=mkToggle('モチベ高い日の詳細（'+p.motivHi+'日）',hiDetails,10);
+      // 具体: 低い日の詳細（トグル）
+      const loDetails=p.lowMotivDays.map(d=>{const parts=[];if(d.slMins)parts.push('睡眠'+sleepMinsToStr(d.slMins));parts.push(d.exercise?'運動○':'運動×');if(d.bad)parts.push('不愉快:'+d.bad);if(d.failures.length)parts.push('失敗:'+d.failures.join(','));if(d.motivMemo)parts.push('メモ:'+d.motivMemo);return parts.join(' ／ ')});
+      sm+=mkToggle('モチベ低い日の詳細（'+p.motivLo+'日）',loDetails,10);
     }else if(p.motivHi>0){
       sm+='<div class="sg-insight">😊 高いモチベの日が多い。このペースを維持するために条件をメモしておこう。</div>';
-      if(p.hiMotivMemos.length)sm+='<div class="sg-insight">💡 <strong>やる気が出た理由：</strong>'+p.hiMotivMemos.map(v=>esc(v)).join(' ／ ')+'</div>';
+      if(p.hiMotivMemos.length)sm+=mkToggle('やる気が出た理由メモ',p.hiMotivMemos,10);
     }else if(p.motivLo>0){
       sm+='<div class="sg-insight">😔 低いモチベの日が多い。何が影響しているかメモに残すと改善しやすい。</div>';
-      if(p.loMotivMemos.length)sm+='<div class="sg-insight">💡 <strong>低い理由のメモ：</strong>'+p.loMotivMemos.map(v=>esc(v)).join(' ／ ')+'</div>';
+      if(p.loMotivMemos.length)sm+=mkToggle('低い理由のメモ',p.loMotivMemos,10);
     }
     if(p.motivM.length&&!(p.highMotivDays.length>0&&p.lowMotivDays.length>0)){
-      sm+='<div class="sg-insight">💡 <strong>やる気に影響した要因メモ：</strong>'+p.motivM.slice(-3).map(v=>esc(v)).join(' ／ ')+'</div>';
+      sm+=mkToggle('やる気に影響した要因メモ',p.motivM,10);
     }
-    sm+='</div>';html+=mSec('mece-s1','🔥','モチベーション分析（高い日vs低い日）',sm)
+    html+=mSec('mece-s1','🔥','モチベーション分析（高い日vs低い日）',sm);
   }
 
   // 5. 総合考察と次の目標設定（データ全体を複合的に見て傾向→目標）
@@ -1152,7 +1248,7 @@ function renderSuggest(entries,period,key){
   // 前回目標との照合（あれば）
   if(prevGoals){
     s5+='<div style="background:#f5f0ff;border-left:3px solid #7c4dff;padding:8px 10px;border-radius:0 8px 8px 0;margin-bottom:12px">';
-    s5+='<div style="font-size:12px;font-weight:700;color:#7c4dff;margin-bottom:4px">📋 前の'+unit+'の目標</div>';
+    s5+='<div style="font-size:12px;font-weight:700;color:#7c4dff;margin-bottom:4px">📋 '+(curGoal?'今'+unit+'の目標':'前の'+unit+'の目標提案')+'</div>';
     s5+='<div style="font-size:13px;color:var(--text)">'+esc(prevGoals)+'</div>';
     if(p.motivAvg){s5+='<div style="font-size:11px;color:var(--textl);margin-top:4px">→ 今'+unit+'のモチベ平均 <strong>'+p.motivAvg.toFixed(1)+'</strong> / 運動 <strong>'+p.exD+'日</strong> / 睡眠 <strong>'+(p.avgSl?Math.floor(p.avgSl)+'時間'+Math.round(p.avgSl%1*60)+'分':'データなし')+'</strong></div>'}
     s5+='</div>';
