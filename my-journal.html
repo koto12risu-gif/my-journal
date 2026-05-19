@@ -323,6 +323,27 @@ canvas.motiv-chart{width:100%;display:block}
 .sg-toggle .sg-detail-list .sg-d-item:last-child{border-bottom:none}
 .sg-common{background:rgba(255,255,255,.7);border-radius:10px;padding:8px 12px;margin-top:6px;font-size:12px;line-height:1.6}
 .sg-common strong{color:var(--text)}
+.wg-item{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.7);margin-bottom:6px}
+.wg-item-num{font-size:12px;font-weight:700;color:var(--lav3);min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#ede7f6;flex-shrink:0;margin-top:2px}
+.wg-item-body{flex:1;min-width:0}
+.wg-item-text{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px}
+.wg-item-progress{width:100%;font-size:12px;padding:5px 8px;border:1.5px solid #ede7f6;border-radius:8px;font-family:inherit;outline:none;transition:border-color .2s}
+.wg-item-progress:focus{border-color:var(--lav2)}
+.wg-item-del{background:none;border:none;cursor:pointer;font-size:14px;color:var(--textll);padding:2px}
+.wg-add-row{display:flex;gap:6px;margin-top:6px}
+.wg-add-row input{flex:1;font-size:12px;padding:6px 10px;border:1.5px dashed #d0c4e0;border-radius:8px;font-family:inherit;outline:none}
+.wg-add-row input:focus{border-color:var(--lav2);border-style:solid}
+.wg-add-row button{padding:6px 12px;font-size:12px;border:none;border-radius:8px;background:var(--lav2);color:#fff;cursor:pointer;font-weight:700;white-space:nowrap}
+.gt-grid{width:100%;border-collapse:separate;border-spacing:0;font-size:11px}
+.gt-grid th{padding:4px 2px;font-weight:700;color:var(--textl);text-align:center;font-size:10px}
+.gt-grid td{padding:4px 2px;text-align:center;border-bottom:1px solid #f5f0ff}
+.gt-goal-cell{text-align:left!important;font-weight:600;font-size:12px;color:var(--text);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px!important}
+.gt-day-cell{font-size:11px;color:var(--text);max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt-empty{color:var(--textll);font-size:14px}
+.gt-done{color:#4caf50;font-size:14px}
+.gt-pbar{width:100%;height:6px;border-radius:3px;background:#f0eaf8;overflow:hidden;margin-top:2px}
+.gt-pbar-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--lav2),var(--lav3));transition:width .3s}
+.gt-rate{font-size:11px;font-weight:700;color:var(--lav3)}
 .sg-data{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.7);border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;color:#5a4a6a;margin:2px}
 .sg-empty{text-align:center;padding:20px;color:var(--textl);font-size:13px}
 .sg-goal-box{background:linear-gradient(135deg,#e8f5e9,#f0fff8);border-radius:14px;padding:16px;margin-top:12px;border:2px solid #c8e6c9}
@@ -371,9 +392,9 @@ canvas.motiv-chart{width:100%;display:block}
     </div>
     <div style="height:10px"></div>
     <div class="goal-section" id="weekly-goal-section">
-      <div class="goal-header"><span class="goal-badge weekly-badge">&#128197; 今週の目標</span><span class="goal-period" id="wg-period"></span><button class="btn btn-ghost btn-sm" id="wg-edit-btn" onclick="toggleEdit('wg')" style="display:none">&#9999;&#65039; 編集</button></div>
-      <div class="goal-display" id="wg-display"><span class="goal-empty">まだ設定されていないよ（土曜日に設定しよう）</span></div>
-      <div id="wg-edit" style="display:none"><textarea id="wg-input" rows="2" placeholder="今週の目標を入力..."></textarea><button class="btn btn-pink btn-sm" onclick="saveGoal('weekly')" style="margin-top:6px">&#128190; 保存</button></div>
+      <div class="goal-header"><span class="goal-badge weekly-badge">📅 今週の目標</span><span class="goal-period" id="wg-period"></span></div>
+      <div id="wg-goals-list"></div>
+      <div class="wg-add-row"><input type="text" id="wg-new-input" placeholder="新しい目標を追加..." onkeydown="if(event.key==='Enter')addWG()"><button onclick="addWG()">＋ 追加</button></div>
     </div>
   </div>
   <!-- Time -->
@@ -419,6 +440,7 @@ canvas.motiv-chart{width:100%;display:block}
   </div>
   <div class="card"><div class="card-h"><span>&#128202;</span> 今週の記録状況</div><div class="week-grid" id="wk-grid"></div><div class="stats-row" id="wk-stats"></div></div>
   <div class="card" id="wk-motiv-card" style="display:none"><div class="card-h"><span>&#128293;</span> モチベーショングラフ</div><div class="chart-wrap"><canvas id="wk-motiv-cv" class="motiv-chart" height="180"></canvas><div class="chart-legend"><span><span class="chart-legend-dot" style="background:#e91e63"></span>モチベ</span><span><span class="chart-legend-dot" style="background:#b39ddb"></span>平均</span><span><span class="chart-legend-dot" style="background:rgba(129,199,132,.3)"></span>運動日</span></div></div><div id="wk-motiv-ins"></div></div>
+  <div class="card" id="wk-gt-card" style="display:none"><div class="card-h"><span>🎯</span> 目標トラッキング</div><div id="wk-gt"></div></div>
   <div class="card"><div class="card-h"><span>&#128270;</span> 日報から自動集計</div><div id="wk-agg"><div class="empty"><span class="empty-emoji">&#128203;</span>日報を記録すると自動集計されるよ！</div></div></div>
   <div class="suggest-card" id="wk-sg-card" style="display:none"><div class="suggest-h"><span>&#129302;</span> MECE分析 &amp; 目標提案</div><div class="suggest-sub">日報データから自動分析</div><div id="wk-sg"></div></div>
   <div class="card"><div class="card-h"><span>&#9997;&#65039;</span> 週次振り返り</div>
@@ -426,7 +448,7 @@ canvas.motiv-chart{width:100%;display:block}
     <div class="fg"><label>良かったこと</label><textarea id="w-good" rows="2"></textarea></div>
     <div class="fg"><label>改善できそうなこと</label><textarea id="w-imp" rows="2"></textarea></div>
     <div class="fg"><label>来週頑張りたいこと</label><textarea id="w-hard" rows="2"></textarea></div>
-    <div class="fg"><label>来週の目標案</label><textarea id="w-next" rows="2"></textarea></div>
+    <div class="fg"><label>来週の目標案（1行1目標）</label><textarea id="w-next" rows="3" placeholder="・毎日7:00に起きる&#10;・毎日腹筋する&#10;・本を毎日読む"></textarea></div>
     <div class="save-row"><button class="btn btn-lav" onclick="saveWeekly()">&#128190; 週報を保存</button></div>
   </div>
   <div class="div"></div>
@@ -698,32 +720,70 @@ function delImpRow(i){impRows.splice(i,1);if(!impRows.length)impRows=[{content:'
 function rebuildImp(){document.getElementById('imp-list').innerHTML=impRows.map((r,i)=>'<div class="dyn-item"><div class="dyn-num">'+(i+1)+'</div><div class="dyn-item-body"><textarea oninput="impRows['+i+'].content=this.value" placeholder="例：明日は会議前に資料を10分見直す...">'+esc(r.content)+'</textarea></div><button class="btn-del-row" onclick="delImpRow('+i+')">&#10005;</button></div>').join('')}
 
 // Goals
-function getWG(wk){return(D.weeklyGoals||{})[wk]||''}
 function getMG(mk){return(D.monthlyGoals||{})[mk]||''}
+// 週目標: 配列形式 [{id,text,daily:{date:progressText}}]（旧文字列形式も自動変換）
+function getWGs(wk){
+  const raw=(D.weeklyGoals||{})[wk];
+  if(!raw)return[];
+  if(Array.isArray(raw))return raw;
+  // 旧形式（文字列）→ 配列に変換（改行区切りで複数目標として分割）
+  const lines=String(raw).split(/\n/).map(s=>s.replace(/^[・\-\*\d+\.\s]+/,'').trim()).filter(Boolean);
+  const arr=lines.map(t=>({id:Date.now()+''+Math.random().toString(36).slice(2,6),text:t,daily:{}}));
+  // 変換したデータを保存
+  if(!D.weeklyGoals)D.weeklyGoals={};
+  D.weeklyGoals[wk]=arr;
+  return arr;
+}
+// 週目標の文字列表現（集計表示用）
+function getWGText(wk){const gs=getWGs(wk);return gs.map(g=>g.text).join('\n')}
+function setWGs(wk,arr){if(!D.weeklyGoals)D.weeklyGoals={};D.weeklyGoals[wk]=arr}
 function renderGoals(date){
   const dt=new Date(date+'T00:00:00'),dow=dt.getDay(),dom=dt.getDate();
   const wk=weekKey(date),mk=date.slice(0,7);
   const isSat=dow===6,is1st=dom===1;
-  const wg=getWG(wk),mg=getMG(mk);
+  const mg=getMG(mk);
   // Monthly
   document.getElementById('mg-period').textContent=dt.getFullYear()+'年'+(dt.getMonth()+1)+'月';
-  document.getElementById('mg-display').innerHTML=mg?esc(mg):(is1st?'<div class="goal-set-prompt"><p>&#127800; 月が始まったよ！今月の目標を設定しよう</p></div>':'<span class="goal-empty">まだ設定されていないよ（月初に設定しよう）</span>');
+  document.getElementById('mg-display').innerHTML=mg?esc(mg):(is1st?'<div class="goal-set-prompt"><p>🌸 月が始まったよ！今月の目標を設定しよう</p></div>':'<span class="goal-empty">まだ設定されていないよ（月初に設定しよう）</span>');
   document.getElementById('mg-edit-btn').style.display=(is1st||!mg)?'':'none';
   document.getElementById('mg-edit').style.display='none';
   document.getElementById('mg-input').value=mg;
-  // Weekly
+  // Weekly: 複数目標＋日次進捗
   const ws=new Date(wk+'T00:00:00'),we=new Date(ws);we.setDate(ws.getDate()+6);
   document.getElementById('wg-period').textContent=(ws.getMonth()+1)+'/'+ws.getDate()+' ~ '+(we.getMonth()+1)+'/'+we.getDate();
-  document.getElementById('wg-display').innerHTML=wg?esc(wg):(isSat?'<div class="goal-set-prompt"><p>&#128197; 新しい週の始まり！今週の目標を設定しよう</p></div>':'<span class="goal-empty">まだ設定されていないよ（土曜日に設定しよう）</span>');
-  document.getElementById('wg-edit-btn').style.display=(isSat||!wg)?'':'none';
-  document.getElementById('wg-edit').style.display='none';
-  document.getElementById('wg-input').value=wg;
+  renderWGList(date);
+}
+function renderWGList(date){
+  const wk=weekKey(date);
+  const goals=getWGs(wk);
+  const el=document.getElementById('wg-goals-list');
+  if(!goals.length){el.innerHTML='<div style="font-size:12px;color:var(--textl);padding:4px 0">まだ目標がないよ。下から追加しよう！</div>';return}
+  el.innerHTML=goals.map((g,i)=>{
+    const prog=(g.daily||{})[date]||'';
+    return'<div class="wg-item"><div class="wg-item-num">'+(i+1)+'</div><div class="wg-item-body"><div class="wg-item-text">'+esc(g.text)+'</div><input class="wg-item-progress" type="text" value="'+esc(prog)+'" placeholder="今日の取り組み..." oninput="updWGProg(\''+wk+'\',\''+g.id+'\',\''+date+'\',this.value)"></div><button class="wg-item-del" onclick="delWG(\''+wk+'\',\''+g.id+'\')">✕</button></div>'
+  }).join('');
+}
+function addWG(){
+  const inp=document.getElementById('wg-new-input');const text=inp.value.trim();if(!text)return;
+  const date=document.getElementById('daily-date').value||today();const wk=weekKey(date);
+  const goals=getWGs(wk);
+  goals.push({id:Date.now()+''+Math.random().toString(36).slice(2,6),text:text,daily:{}});
+  setWGs(wk,goals);inp.value='';save();renderWGList(date);showToast('目標を追加したよ！','lav');
+}
+function delWG(wk,id){
+  if(!confirm('この目標を削除しますか？'))return;
+  const goals=getWGs(wk).filter(g=>g.id!==id);
+  setWGs(wk,goals);save();
+  const date=document.getElementById('daily-date').value||today();renderWGList(date);
+}
+function updWGProg(wk,id,date,val){
+  const goals=getWGs(wk);const g=goals.find(g=>g.id===id);
+  if(g){if(!g.daily)g.daily={};g.daily[date]=val;setWGs(wk,goals);saveLocal();clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveCloud(),2000)}
 }
 function toggleEdit(p){const el=document.getElementById(p+'-edit');el.style.display=el.style.display==='none'?'':'none';if(el.style.display!=='none')document.getElementById(p+'-input').focus()}
 function saveGoal(type){
   const date=document.getElementById('daily-date').value||today();
-  if(type==='weekly'){if(!D.weeklyGoals)D.weeklyGoals={};D.weeklyGoals[weekKey(date)]=document.getElementById('wg-input').value.trim();showToast('週の目標を保存したよ！','lav')}
-  else{if(!D.monthlyGoals)D.monthlyGoals={};D.monthlyGoals[date.slice(0,7)]=document.getElementById('mg-input').value.trim();showToast('月の目標を保存したよ！','peach')}
+  if(!D.monthlyGoals)D.monthlyGoals={};D.monthlyGoals[date.slice(0,7)]=document.getElementById('mg-input').value.trim();showToast('月の目標を保存したよ！','peach');
   save();renderGoals(date);
 }
 
@@ -756,7 +816,7 @@ function showDailyDetail(rawDate){
   const dt=parseDate(date);
   const label=dt?dt.getFullYear()+'年'+(dt.getMonth()+1)+'月'+dt.getDate()+'日（'+DAY_L[dt.getDay()]+'）':date;
   let rows='';
-  const wg=getWG(weekKey(date)),mg=getMG(date.slice(0,7));
+  const wg=getWGText(weekKey(date)),mg=getMG(date.slice(0,7));
   if(mg)rows+=dr('&#128197; 今月の目標',mg);if(wg)rows+=dr('&#128197; 今週の目標',wg);
   const impArr=Array.isArray(e.impressions)?e.impressions:(e.timeEntries&&e.timeEntries.length?e.timeEntries.map(t=>({content:t.activity+(t.hours?' ('+t.hours+'h)':'')})):[]);
   if(impArr.length)rows+=dr('印象的だった出来事',impArr.map((r,i)=>(i+1)+'. '+r.content).join('\n'));
@@ -801,6 +861,8 @@ function loadWeekly(){
   const slCompareStr=prevSlMins?'先週 '+sleepMinsToStr(prevSlMins)+' '+slArrow:'';
   const motivE=entries.filter(e=>e.motivation);const mAvg=motivE.length?motivE.reduce((s,e)=>s+e.motivation,0)/motivE.length:0;
   document.getElementById('wk-stats').innerHTML='<div class="stat-box mint"><div class="stat-val">'+rec+'<span class="stat-unit">/7</span></div><div class="stat-label">記録日数</div></div><div class="stat-box lav"><div class="stat-val">'+exD+'</div><div class="stat-label">運動日</div></div><div class="stat-box sky"><div class="stat-val">'+(curSlMins?sleepMinsToStr(curSlMins):'--')+'</div><div class="stat-label">平均睡眠</div>'+(slCompareStr?'<div style="font-size:10px;color:var(--textl);margin-top:2px">'+slCompareStr+'</div>':'')+'</div>'+(mAvg?'<div class="stat-box peach"><div class="stat-val">'+ME[Math.round(mAvg)]+'<span class="stat-unit">'+mAvg.toFixed(1)+'</span></div><div class="stat-label">平均やる気</div></div>':'');
+  // Goal tracking
+  renderGoalTracking(curWK,dates);
   // Motiv chart
   drawMotivWeekly(dates);
   // Agg
@@ -813,6 +875,34 @@ function loadWeekly(){
   renderWeeklyHist();
 }
 
+function renderGoalTracking(wk,dates){
+  const card=document.getElementById('wk-gt-card');
+  const el=document.getElementById('wk-gt');
+  const goals=getWGs(wk);
+  if(!goals.length){card.style.display='none';return}
+  card.style.display='';
+  let h='<table class="gt-grid"><tr><th style="text-align:left;min-width:100px">目標</th>';
+  dates.forEach((d,i)=>h+='<th>'+WDN[i]+'</th>');
+  h+='<th>達成</th></tr>';
+  goals.forEach(g=>{
+    let logged=0;
+    h+='<tr><td class="gt-goal-cell" title="'+esc(g.text)+'">'+esc(g.text)+'</td>';
+    dates.forEach(d=>{
+      const prog=(g.daily||{})[d]||'';
+      if(prog){logged++;h+='<td class="gt-day-cell" title="'+esc(prog)+'"><span class="gt-done">✓</span></td>'}
+      else{h+='<td class="gt-day-cell"><span class="gt-empty">-</span></td>'}
+    });
+    const rate=Math.round(logged/7*100);
+    h+='<td><div class="gt-rate">'+rate+'%</div><div class="gt-pbar"><div class="gt-pbar-fill" style="width:'+rate+'%"></div></div></td></tr>';
+  });
+  h+='</table>';
+  // 全体達成率
+  const totalLogged=goals.reduce((s,g)=>s+dates.filter(d=>(g.daily||{})[d]).length,0);
+  const totalPossible=goals.length*7;
+  const totalRate=totalPossible?Math.round(totalLogged/totalPossible*100):0;
+  h+='<div style="margin-top:10px;text-align:center;font-size:13px;font-weight:700;color:var(--lav3)">📊 全体達成率: '+totalRate+'%（'+totalLogged+'/'+totalPossible+'日）</div>';
+  el.innerHTML=h;
+}
 function calcSleepMinsArr(entries){return entries.filter(e=>e.wakeup&&e.bedtime).map(e=>{const bt=fixTime(e.bedtime),wu=fixTime(e.wakeup);if(!bt||!wu)return null;const[bh,bm]=bt.split(':').map(Number),[wh,wm]=wu.split(':').map(Number);if(isNaN(bh)||isNaN(wh))return null;let d=(wh*60+wm)-(bh*60+bm);if(d<0)d+=1440;return d}).filter(d=>d!==null&&d>60&&d<720)}
 function calcAvgSleepMins(entries){const m=calcSleepMinsArr(entries);return m.length?m.reduce((a,b)=>a+b,0)/m.length:0}
 function sleepMinsToStr(m){return m?Math.floor(m/60)+'時間'+String(Math.round(m%60)).padStart(2,'0')+'分':'--'}
@@ -821,7 +911,7 @@ function calcAvgSleep(entries){const m=calcAvgSleepMins(entries);return m?sleepM
 function renderWeeklyAgg(entries){
   const el=document.getElementById('wk-agg');
   if(!entries.length){el.innerHTML='<div class="empty"><span class="empty-emoji">&#128203;</span>この週の日報がないよ</div>';return}
-  const wg=getWG(curWK),mg=getMG(curWK.slice(0,7));
+  const wg=getWGText(curWK),mg=getMG(curWK.slice(0,7));
   const enj=[],bad=entries.filter(e=>e.badWhat).map(e=>e.badWhat);
   entries.forEach(e=>{(Array.isArray(e.enjoyments)?e.enjoyments:(e.enjoyWhat?[{what:e.enjoyWhat}]:[])).filter(r=>r.what).forEach(r=>enj.push(r.what))});
   const imp=[],weaks=[];
@@ -1063,7 +1153,7 @@ function renderSuggest(entries,period,key){
   if(entries.length<2){card.style.display='none';return}card.style.display='';
   const p=analyze(entries);
   const prevKey=period==='weekly'?(()=>{const d=new Date(key+'T00:00:00');d.setDate(d.getDate()-7);return toLD(d)})():(()=>{const[y,m]=key.split('-').map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')})();
-  const curGoal=period==='weekly'?getWG(key):getMG(key);
+  const curGoal=period==='weekly'?getWGText(key):getMG(key);
   const prevNextGoals=period==='weekly'?((D.weekly[prevKey]||{}).nextGoals||''):((D.monthly[prevKey]||{}).nextGoals||'');
   const prevGoals=curGoal||prevNextGoals;
   const unit=period==='weekly'?'週':'月';let html='';
